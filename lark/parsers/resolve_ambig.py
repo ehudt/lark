@@ -9,11 +9,7 @@ from ..tree import Tree, Visitor_NoRecurse
 # Author: Erez Sh
 
 def _compare_rules(rule1, rule2):
-    c = -compare( len(rule1.expansion), len(rule2.expansion))
-    if rule1.origin.startswith('__'):   # XXX hack! We should set priority in parser, not here
-        c = -c
-    return c
-
+    return -compare( len(rule1.expansion), len(rule2.expansion))
 
 def _sum_priority(tree):
     p = 0
@@ -30,11 +26,15 @@ def _compare_priority(tree1, tree2):
     tree1.iter_subtrees()
 
 def _compare_drv(tree1, tree2):
-    try:
-        rule1, rule2 = tree1.rule, tree2.rule
-    except AttributeError:
-        # Probably non-trees, or user trees that weren't created by the parse (better way to distinguish?)
+    rule1 = getattr(tree1, 'rule', None)
+    rule2 = getattr(tree2, 'rule', None)
+
+    if None == rule1 == rule2:
         return compare(tree1, tree2)
+    elif rule1 is None:
+        return -1
+    elif rule2 is None:
+        return 1
 
     assert tree1.data != '_ambig'
     assert tree2.data != '_ambig'

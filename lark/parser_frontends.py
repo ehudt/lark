@@ -4,7 +4,6 @@ from .utils import get_regexp_width
 from .parsers.grammar_analysis import GrammarAnalyzer
 from .lexer import Lexer, ContextualLexer, Token
 
-from .common import GrammarError
 from .common import is_terminal, GrammarError
 from .parsers import lalr_parser, earley, xearley, resolve_ambig, cyk
 from .tree import Tree
@@ -12,13 +11,13 @@ from .tree import Tree
 class WithLexer:
     def init_traditional_lexer(self, lexer_conf):
         self.lexer_conf = lexer_conf
-        self.lexer = Lexer(lexer_conf.tokens, ignore=lexer_conf.ignore)
+        self.lexer = Lexer(lexer_conf.tokens, ignore=lexer_conf.ignore, user_callbacks=lexer_conf.callbacks)
 
     def init_contextual_lexer(self, lexer_conf, parser_conf):
         self.lexer_conf = lexer_conf
-        d = {idx:t.keys() for idx, t in self.parser.analysis.parse_table.states.items()}
+        states = {idx:list(t.keys()) for idx, t in self.parser._parse_table.states.items()}
         always_accept = lexer_conf.postlex.always_accept if lexer_conf.postlex else ()
-        self.lexer = ContextualLexer(lexer_conf.tokens, d, ignore=lexer_conf.ignore, always_accept=always_accept)
+        self.lexer = ContextualLexer(lexer_conf.tokens, states, ignore=lexer_conf.ignore, always_accept=always_accept, user_callbacks=lexer_conf.callbacks)
 
     def lex(self, text):
         stream = self.lexer.lex(text)
@@ -82,7 +81,7 @@ class Earley_NoLex:
             regexp = t.pattern.to_regexp()
             width = get_regexp_width(regexp)
             if width != (1,1):
-                raise GrammarError('Scanless parsing (lexer=None) requires all tokens to have a width of 1 (terminal %s: %s is %s)' % (sym, regexp, width))
+                raise GrammarError('Scanless parsing (lexer=None) requires all tokens to have a width of 1 (terminal %s: %s is %s)' % (t.name, regexp, width))
             self.regexps[t.name] = re.compile(regexp)
 
     def parse(self, text):
@@ -130,7 +129,7 @@ class XEarley:
                 raise ValueError("Bad regexp in token %s: %s" % (t.name, regexp))
             else:
                 if width == 0:
-                    raise ValueError("Dynamic Earley doesn't allow zero-width regexps")
+                    raise ValueError("Dynamic Earley doesn't allow zero-width regexps", t)
 
             self.regexps[t.name] = re.compile(regexp)
 
@@ -138,52 +137,38 @@ class XEarley:
         return self.parser.parse(text)
 
 
-class Earley(WithLexer):
+class CYK(WithLexer):
+
     def __init__(self, lexer_conf, parser_conf, options=None):
         self.init_traditional_lexer(lexer_conf)
 
-        self.parser = earley.Parser(parser_conf, self.match,
-                                    resolve_ambiguity=get_ambiguity_resolver(options))
+        self._analysis = GrammarAnalyzer(parser_conf)
+        self._parser = cyk.Parser(parser_conf.rules, parser_conf.start)
 
-    def match(self, term, token):
-        return term == token.type
+        self._postprocess = {}
+        for rule in parser_conf.rules:
+            a = rule.alias
+            self._postprocess[a] = a if callable(a) else (a and getattr(parser_conf.callback, a))
 
     def parse(self, text):
-        tokens = self.lex(text)
-        return self.parser.parse(tokens)
+        tokens = list(self.lex(text))
+        parse = self._parser.parse(tokens)
+        parse = self._transform(parse)
+        return parse
 
-class CYK(WithLexer):
+    def _transform(self, tree):
+        subtrees = list(tree.iter_subtrees())
+        for subtree in subtrees:
+            subtree.children = [self._apply_callback(c) if isinstance(c, Tree) else c for c in subtree.children]
 
-  def __init__(self, lexer_conf, parser_conf, options=None):
-    self.init_traditional_lexer(lexer_conf)
+        return self._apply_callback(tree)
 
-    self._analysis = GrammarAnalyzer(parser_conf)
-    self._parser = cyk.Parser(self._analysis.rules, parser_conf.start)
-
-    self._postprocess = {}
-    for rule in self._analysis.rules:
-        a = rule.alias
-        self._postprocess[a] = a if callable(a) else (a and getattr(parser_conf.callback, a))
-
-  def parse(self, text):
-    tokens = list(self.lex(text))
-    parse = self._parser.parse(tokens)
-    parse = self._transform(parse)
-    return parse
-
-  def _transform(self, tree):
-    subtrees = list(tree.iter_subtrees())
-    for subtree in subtrees:
-      subtree.children = [self._apply_callback(c) if isinstance(c, Tree) else c for c in subtree.children]
-
-    return self._apply_callback(tree)
-
-  def _apply_callback(self, tree):
-    children = tree.children
-    callback = self._postprocess[tree.rule.alias]
-    assert callback, tree.rule.alias
-    r = callback(children)
-    return r
+    def _apply_callback(self, tree):
+        children = tree.children
+        callback = self._postprocess[tree.rule.alias]
+        assert callback, tree.rule.alias
+        r = callback(children)
+        return r
 
 
 def get_frontend(parser, lexer):

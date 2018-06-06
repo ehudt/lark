@@ -2,9 +2,9 @@
 
 Parse any context-free grammar, FAST and EASY!
 
-**Beginners**: Forget everything you knew about parsers. Lark's algorithm can quickly parse any grammar you throw at it, no matter how complicated. It also constructs a parse-tree for you, without additional code on your part.
+**Beginners**: Lark is not just another parser. It can parse any grammar you throw at it, no matter how complicated or ambiguous, and do so efficiently. It also constructs a parse-tree for you, without additional code on your part.
 
-**Experts**: Lark lets you choose between Earley and LALR(1), to trade-off power and speed. It also contains experimental features such as a contextual-lexer.
+**Experts**: Lark lets you choose between Earley and LALR(1), to trade-off power and speed. It also contains a CYK parser and experimental features such as a contextual-lexer.
 
 Lark can:
 
@@ -23,6 +23,8 @@ Most importantly, Lark will save you time and prevent you from getting parsing h
 - [Documentation wiki](https://github.com/erezsh/lark/wiki)
 - [Tutorial](/docs/json_tutorial.md) for writing a JSON parser.
 - Blog post: [How to write a DSL with Lark](http://blog.erezsh.com/how-to-write-a-dsl-in-python-with-lark/)
+- [Forum @googlegroups](https://groups.google.com/forum/#!forum/lark-parser) (New)
+- [IRC: #lark](https://webchat.freenode.net/?channels=lark) at freenode
 
 ### Install Lark
 
@@ -30,7 +32,7 @@ Most importantly, Lark will save you time and prevent you from getting parsing h
 
 Lark has no dependencies.
 
-[![Build Status](https://travis-ci.org/erezsh/lark.svg?branch=master)](https://travis-ci.org/erezsh/lark)
+[![Build Status](https://travis-ci.org/lark-parser/lark.svg?branch=master)](https://travis-ci.org/lark-parser/lark)
 
 ### Hello World
 
@@ -72,6 +74,7 @@ See more [examples in the wiki](https://github.com/erezsh/lark/wiki/Examples)
  - **LALR(1)** parser
     - Fast and light, competitive with PLY
     - Can generate a stand-alone parser
+ - **CYK** parser, for highly ambiguous grammars (NEW! Courtesy of [ehudt](https://github.com/ehudt))
  - **EBNF** grammar
  - **Unicode** fully supported
  - **Python 2 & 3** compatible
@@ -163,3 +166,5 @@ If you're interested in taking one of these on, let me know and I will provide m
 If you have any questions or want my assistance, you can email me at erezshin at gmail com.
 
 I'm also available for contract work.
+
+ -- [Erez](https://github.com/erezsh)

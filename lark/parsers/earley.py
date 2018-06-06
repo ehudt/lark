@@ -4,7 +4,7 @@
 # When the parse ends successfully, a disambiguation stage resolves all ambiguity
 # (right now ambiguity resolution is not developed beyond the needs of lark)
 # Afterwards the parse tree is reduced (transformed) according to user callbacks.
-# I use the no-recursion version of Transformer and Visitor, because the tree might be
+# I use the no-recursion version of Transformer, because the tree might be
 # deeper than Python's recursion limit (a bit absurd, but that's life)
 #
 # The algorithm keeps track of each state set, using a corresponding Column instance.
@@ -14,7 +14,7 @@
 # Email : erezshin@gmail.com
 
 from ..common import ParseError, UnexpectedToken, is_terminal
-from ..tree import Tree, Visitor_NoRecurse, Transformer_NoRecurse
+from ..tree import Tree, Transformer_NoRecurse
 from .grammar_analysis import GrammarAnalyzer
 
 
@@ -22,7 +22,8 @@ class Derivation(Tree):
     _hash = None
 
     def __init__(self, rule, items=None):
-        Tree.__init__(self, 'drv', items or [], rule=rule)
+        Tree.__init__(self, 'drv', items or [])
+        self.rule = rule
 
     def _pretty_label(self):    # Nicer pretty for debugging the parser
         return self.rule.origin if self.rule else self.data
@@ -144,16 +145,16 @@ class Column:
 
 class Parser:
     def __init__(self, parser_conf, term_matcher, resolve_ambiguity=None):
-        self.analysis = GrammarAnalyzer(parser_conf)
+        analysis = GrammarAnalyzer(parser_conf)
         self.parser_conf = parser_conf
         self.resolve_ambiguity = resolve_ambiguity
 
-        self.FIRST = self.analysis.FIRST
+        self.FIRST = analysis.FIRST
         self.postprocess = {}
         self.predictions = {}
         for rule in parser_conf.rules:
-            self.postprocess[rule] = getattr(parser_conf.callback, rule.alias)
-            self.predictions[rule.origin] = [x.rule for x in self.analysis.expand_rule(rule.origin)]
+            self.postprocess[rule] = rule.alias if callable(rule.alias) else getattr(parser_conf.callback, rule.alias)
+            self.predictions[rule.origin] = [x.rule for x in analysis.expand_rule(rule.origin)]
 
         self.term_matcher = term_matcher
 
@@ -196,7 +197,7 @@ class Parser:
 
             if not next_set:
                 expect = {i.expect for i in column.to_scan}
-                raise UnexpectedToken(token, expect, stream, i)
+                raise UnexpectedToken(token, expect, stream, set(column.to_scan))
 
             return next_set
 
@@ -233,9 +234,4 @@ class ApplyCallbacks(Transformer_NoRecurse):
         self.postprocess = postprocess
 
     def drv(self, tree):
-        children = tree.children
-        callback = self.postprocess[tree.rule]
-        if callback:
-            return callback(children)
-        else:
-            return Tree(rule.origin, children)
+        return self.postprocess[tree.rule](tree.children)

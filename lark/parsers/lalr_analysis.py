@@ -77,7 +77,7 @@ class LALR_Analyzer(GrammarAnalyzer):
                 lookahead[sym].append((Shift, new_state))
                 if sym == '$END':
                     self.end_states.append( new_state )
-                yield fzset(rps)
+                yield new_state
 
             for k, v in lookahead.items():
                 if len(v) > 1:
@@ -91,7 +91,7 @@ class LALR_Analyzer(GrammarAnalyzer):
 
             for k, v in lookahead.items():
                 if not len(v) == 1:
-                    raise GrammarError("Collision in %s: %s" %(k, v))
+                    raise GrammarError("Collision in %s: %s" %(k, ', '.join(['\n  * %s: %s' % x for x in v])))
 
             self.states[state] = {k:v[0] for k, v in lookahead.items()}
 

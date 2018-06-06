@@ -10,9 +10,11 @@ class LexError(Exception):
     pass
 
 class UnexpectedInput(LexError):
-    def __init__(self, seq, lex_pos, line, column, allowed=None):
+    def __init__(self, seq, lex_pos, line, column, allowed=None, considered_rules=None):
         context = seq[lex_pos:lex_pos+5]
         message = "No token defined for: '%s' in %r at line %d col %d" % (seq[lex_pos], context, line, column)
+        if allowed:
+            message += '\n\nExpecting: %s\n' % allowed
 
         super(UnexpectedInput, self).__init__(message)
 
@@ -20,20 +22,26 @@ class UnexpectedInput(LexError):
         self.column = column
         self.context = context
         self.allowed = allowed
+        self.considered_rules = considered_rules
 
 class Token(Str):
+    __slots__ = ('type', 'pos_in_stream', 'value', 'line', 'column', 'end_line', 'end_column')
+
     def __new__(cls, type_, value, pos_in_stream=None, line=None, column=None):
-        inst = Str.__new__(cls, value)
-        inst.type = type_
-        inst.pos_in_stream = pos_in_stream
-        inst.value = value
-        inst.line = line
-        inst.column = column
-        return inst
+        self = super(Token, cls).__new__(cls, value)
+        self.type = type_
+        self.pos_in_stream = pos_in_stream
+        self.value = value
+        self.line = line
+        self.column = column
+        return self
 
     @classmethod
     def new_borrow_pos(cls, type_, value, borrow_t):
         return cls(type_, value, borrow_t.pos_in_stream, line=borrow_t.line, column=borrow_t.column)
+
+    def __reduce__(self):
+        return (self.__class__, (self.type, self.value, self.pos_in_stream, self.line, self.column, ))
 
     def __repr__(self):
         return 'Token(%s, %r)' % (self.type, self.value)
@@ -82,6 +90,7 @@ class _Lex:
         ignore_types = list(ignore_types)
         line_ctr = LineCounter()
 
+        t = None
         while True:
             lexer = self.lexer
             for mre, type_from_index in lexer.mres:
@@ -94,8 +103,15 @@ class _Lex:
                         if t.type in lexer.callback:
                             t = lexer.callback[t.type](t)
                         yield t
+                    else:
+                        if type_ in lexer.callback:
+                            t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
+                            lexer.callback[type_](t)
 
                     line_ctr.feed(value, type_ in newline_types)
+                    if t:
+                        t.end_line = line_ctr.line
+                        t.end_column = line_ctr.column
                     break
             else:
                 if line_ctr.char_pos < len(stream):
@@ -127,6 +143,8 @@ def _create_unless(tokens):
     for retok in tokens_by_type.get(PatternRE, []):
         unless = [] # {}
         for strtok in tokens_by_type.get(PatternStr, []):
+            if strtok.priority > retok.priority:
+                continue
             s = strtok.pattern.value
             m = re.match(retok.pattern.to_regexp(), s)
             if m and m.group(0) == s:
@@ -163,7 +181,7 @@ def _regexp_has_newline(r):
     return '\n' in r or '\\n' in r or ('(?s)' in r and '.' in r)
 
 class Lexer:
-    def __init__(self, tokens, ignore=()):
+    def __init__(self, tokens, ignore=(), user_callbacks={}):
         assert all(isinstance(t, TokenDef) for t in tokens), tokens
 
         tokens = list(tokens)
@@ -189,6 +207,10 @@ class Lexer:
         tokens, self.callback = _create_unless(tokens)
         assert all(self.callback.values())
 
+        for type_, f in user_callbacks.items():
+            assert type_ not in self.callback
+            self.callback[type_] = f
+
         self.tokens = tokens
 
         self.mres = build_mres(tokens)
@@ -198,7 +220,7 @@ class Lexer:
 
 
 class ContextualLexer:
-    def __init__(self, tokens, states, ignore=(), always_accept=()):
+    def __init__(self, tokens, states, ignore=(), always_accept=(), user_callbacks={}):
         tokens_by_name = {}
         for t in tokens:
             assert t.name not in tokens_by_name, t
@@ -213,12 +235,12 @@ class ContextualLexer:
             except KeyError:
                 accepts = set(accepts) | set(ignore) | set(always_accept)
                 state_tokens = [tokens_by_name[n] for n in accepts if is_terminal(n) and n!='$END']
-                lexer = Lexer(state_tokens, ignore=ignore)
+                lexer = Lexer(state_tokens, ignore=ignore, user_callbacks=user_callbacks)
                 lexer_by_tokens[key] = lexer
 
             self.lexers[state] = lexer
 
-        self.root_lexer = Lexer(tokens, ignore=ignore)
+        self.root_lexer = Lexer(tokens, ignore=ignore, user_callbacks=user_callbacks)
 
         self.set_parser_state(None) # Needs to be set on the outside
 

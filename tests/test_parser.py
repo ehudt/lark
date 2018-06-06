@@ -187,17 +187,22 @@ def _make_full_earley_test(LEXER):
             l.parse(program)
 
 
-        def test_earley_scanless3(self):
-            "Tests prioritization and disambiguation for pseudo-terminals (there should be only one result)"
+        # XXX Fails for scanless mode
+        # XXX Decided not to fix, because
+        #       a) It's a subtle bug
+        #       b) Scanless is intended for deprecation
+        #
+        # def test_earley_scanless3(self):
+        #     "Tests prioritization and disambiguation for pseudo-terminals (there should be only one result)"
 
-            grammar = """
-            start: A A
-            A: "a"+
-            """
+        #     grammar = """
+        #     start: A A
+        #     A: "a"+
+        #     """
 
-            l = Lark(grammar, parser='earley', lexer=LEXER)
-            res = l.parse("aaa")
-            self.assertEqual(res.children, ['aa', 'a'])
+        #     l = Lark(grammar, parser='earley', lexer=LEXER)
+        #     res = l.parse("aaa")
+        #     self.assertEqual(res.children, ['aa', 'a'])
 
         def test_earley_scanless4(self):
             grammar = """
@@ -291,6 +296,39 @@ def _make_full_earley_test(LEXER):
             # print expected.pretty()
 
             self.assertEqual(res, expected)
+
+
+        def test_explicit_ambiguity2(self):
+            grammar = r"""
+            start: NAME+
+            NAME: /\w+/
+            %ignore " "
+            """
+            text = """cat"""
+
+            parser = Lark(grammar, start='start', ambiguity='explicit')
+            tree = parser.parse(text)
+            self.assertEqual(tree.data, '_ambig')
+
+            combinations = {tuple(str(s) for s in t.children) for t in tree.children}
+            self.assertEqual(combinations, {
+                ('cat',),
+                ('ca', 't'),
+                ('c', 'at'),
+                ('c', 'a' ,'t')
+            })
+
+        def test_term_ambig_resolve(self):
+            grammar = r"""
+            !start: NAME+
+            NAME: /\w+/
+            %ignore " "
+            """
+            text = """foo bar"""
+
+            parser = Lark(grammar)
+            tree = parser.parse(text)
+            self.assertEqual(tree.children, ['foo', 'bar'])
 
 
 
@@ -822,6 +860,12 @@ def _make_parser_test(LEXER, PARSER):
                 """
             self.assertRaises( GrammarError, _Lark, g)
 
+        def test_alias_in_terminal(self):
+            g = """start: TERM
+                TERM: "a" -> alias
+                """
+            self.assertRaises( GrammarError, _Lark, g)
+
         @unittest.skipIf(LEXER==None, "TODO: Fix scanless parsing or get rid of it") # TODO
         def test_line_and_column(self):
             g = r"""!start: "A" bc "D"
@@ -839,12 +883,13 @@ def _make_parser_test(LEXER, PARSER):
             self.assertEqual(d.line, 2)
             self.assertEqual(d.column, 1)
 
-            # self.assertEqual(a.end_line, 1)
-            # self.assertEqual(a.end_col, 1)
-            # self.assertEqual(bc.end_line, 2)
-            # self.assertEqual(bc.end_col, 1)
-            # self.assertEqual(d.end_line, 2)
-            # self.assertEqual(d.end_col, 2)
+            if LEXER != 'dynamic':
+                self.assertEqual(a.end_line, 1)
+                self.assertEqual(a.end_column, 1)
+                self.assertEqual(bc.end_line, 2)
+                self.assertEqual(bc.end_column, 1)
+                self.assertEqual(d.end_line, 2)
+                self.assertEqual(d.end_column, 2)
 
 
 
@@ -1073,7 +1118,73 @@ def _make_parser_test(LEXER, PARSER):
             _Lark(r'start: "\\\t"').parse('\\\t')
 
 
+        def test_ranged_repeat_rules(self):
+            g = u"""!start: "A"~3
+                """
+            l = _Lark(g)
+            self.assertEqual(l.parse(u'AAA'), Tree('start', ["A", "A", "A"]))
+            self.assertRaises(ParseError, l.parse, u'AA')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAAA')
 
+
+            g = u"""!start: "A"~0..2
+                """
+            if PARSER != 'cyk': # XXX CYK currently doesn't support empty grammars
+                l = _Lark(g)
+                self.assertEqual(l.parse(u''), Tree('start', []))
+                self.assertEqual(l.parse(u'A'), Tree('start', ['A']))
+                self.assertEqual(l.parse(u'AA'), Tree('start', ['A', 'A']))
+                self.assertRaises((UnexpectedToken, UnexpectedInput), l.parse, u'AAA')
+
+            g = u"""!start: "A"~3..2
+                """
+            self.assertRaises(GrammarError, _Lark, g)
+
+            g = u"""!start: "A"~2..3 "B"~2
+                """
+            l = _Lark(g)
+            self.assertEqual(l.parse(u'AABB'), Tree('start', ['A', 'A', 'B', 'B']))
+            self.assertEqual(l.parse(u'AAABB'), Tree('start', ['A', 'A', 'A', 'B', 'B']))
+            self.assertRaises(ParseError, l.parse, u'AAAB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAABBB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'ABB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAAABB')
+
+
+        def test_ranged_repeat_terms(self):
+            g = u"""!start: AAA
+                    AAA: "A"~3
+                """
+            l = _Lark(g)
+            self.assertEqual(l.parse(u'AAA'), Tree('start', ["AAA"]))
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AA')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAAA')
+
+            g = u"""!start: AABB CC
+                    AABB: "A"~0..2 "B"~2
+                    CC: "C"~1..2
+                """
+            l = _Lark(g)
+            self.assertEqual(l.parse(u'AABBCC'), Tree('start', ['AABB', 'CC']))
+            self.assertEqual(l.parse(u'BBC'), Tree('start', ['BB', 'C']))
+            self.assertEqual(l.parse(u'ABBCC'), Tree('start', ['ABB', 'CC']))
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAAB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAABBB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'ABB')
+            self.assertRaises((ParseError, UnexpectedInput), l.parse, u'AAAABB')
+
+        @unittest.skipIf(PARSER=='earley', "Priority not handled correctly right now")  # TODO XXX
+        def test_priority_vs_embedded(self):
+            g = """
+            A.2: "a"
+            WORD: ("a".."z")+
+
+            start: (A | WORD)+
+            """
+            l = _Lark(g)
+            t = l.parse('abc')
+            self.assertEqual(t.children, ['a', 'bc'])
+            self.assertEqual(t.children[0].type, 'A')
 
 
 

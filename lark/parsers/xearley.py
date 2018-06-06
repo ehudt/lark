@@ -20,7 +20,7 @@
 
 from collections import defaultdict
 
-from ..common import ParseError, UnexpectedToken, is_terminal
+from ..common import ParseError, is_terminal
 from ..lexer import Token, UnexpectedInput
 from ..tree import Tree
 from .grammar_analysis import GrammarAnalyzer
@@ -78,7 +78,7 @@ class Parser:
                         raise ParseError('Infinite recursion detected! (rule %s)' % item.rule)
                     column.add(new_items)
 
-        def scan(i, token, column):
+        def scan(i, column):
             to_scan = column.to_scan
 
             for x in self.ignore:
@@ -112,7 +112,7 @@ class Parser:
             del delayed_matches[i+1]    # No longer needed, so unburden memory
 
             if not next_set and not delayed_matches:
-                raise UnexpectedInput(stream, i, text_line, text_column, to_scan)
+                raise UnexpectedInput(stream, i, text_line, text_column, {item.expect for item in to_scan}, set(to_scan))
 
             return next_set
 
@@ -123,7 +123,7 @@ class Parser:
         column = column0
         for i, token in enumerate(stream):
             predict_and_complete(column)
-            column = scan(i, token, column)
+            column = scan(i, column)
 
             if token == '\n':
                 text_line += 1
